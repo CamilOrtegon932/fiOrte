@@ -351,10 +351,18 @@ const dec1 = n => n.toFixed(1).replace('.', ',');
 
 /* ---------- Datos ---------- */
 const blank = () => ({ months:{}, extras:[], rides:[], expenses:[], fixed:[], fixedPaid:{}, loans:[], pots:[], invest:[], brokers:[], settings:{trm:0, trmDate:''} });
+let legacyFixed = false; /* hubo gastos fijos sin vigencia: se guardan ya migrados */
 const LEGACY = {mama:'Mamá', pareja:'Pareja', amigo:'Amigo/a', familia:'Familiar'};
 function normalize(d){
   const s = Object.assign(blank(), d || {});
   s.settings = Object.assign({trm:0, trmDate:''}, s.settings);
+  /* Gastos fijos con vigencia: from = primer mes en que aplica, to = último mes (null = sin fin) */
+  s.fixed.forEach(f => {
+    if (!f.from){
+      const ms = Object.keys(s.fixedPaid).filter(m => s.fixedPaid[m] && s.fixedPaid[m][f.id]).sort();
+      f.from = ms.length ? ms[0] : todayKey; f.to = f.to || null; legacyFixed = true;
+    }
+  });
   s.extras.forEach(x => { if (LEGACY[x.type]){ x.desc = LEGACY[x.type] + (x.desc ? ' · ' + x.desc : ''); x.type = 'otro'; } });
   return s;
 }
@@ -718,17 +726,15 @@ function upcomingPayments(k){
   const paid = m => S.fixedPaid[m] || {};
   const items = [];
   const add = (f, m) => { if (!paid(m)[f.id]) items.push({ f, date: dueDate(m, f.day), amount: f.amount }); };
-  S.fixed.filter(hasDay).forEach(f => {
-    if (mode === 'current'){
-      const limit = addDays(todayStr, UPCOMING_DAYS);
-      [k, shift(k, 1)].forEach(m => { if (dueDate(m, f.day) <= limit) add(f, m); });
-    } else add(f, k);
-  });
+  const limit = addDays(todayStr, UPCOMING_DAYS);
+  (mode === 'current' ? [k, shift(k, 1)] : [k]).forEach(m => fixedIn(m).filter(hasDay).forEach(f => {
+    if (mode !== 'current' || dueDate(m, f.day) <= limit) add(f, m);
+  }));
   /* En un mes pasado sin movimientos no hay nada que señalar como pendiente */
   if (mode === 'past' && !monthHasData(k)) items.length = 0;
   items.forEach(p => { p.days = diffDays(todayStr, p.date); });
   items.sort((a, b) => a.date.localeCompare(b.date));
-  const undated = (mode === 'past' && !monthHasData(k)) ? [] : S.fixed.filter(f => !hasDay(f) && !paid(k)[f.id]);
+  const undated = (mode === 'past' && !monthHasData(k)) ? [] : fixedIn(k).filter(f => !hasDay(f) && !paid(k)[f.id]);
   return { mode, items, total: sum(items), undated, undatedTotal: sum(undated), hasFixed: S.fixed.length > 0 };
 }
 const relDays = d => d === 0 ? 'hoy' : d === 1 ? 'mañana' : d > 1 ? `en ${d} días` : d === -1 ? 'venció ayer' : `venció hace ${-d} días`;
@@ -743,8 +749,8 @@ function dashboard(k){
     k, s, ini, asOf, nw, disp: nw.disp,
     incCmp: compareWithPrev(s.income, ps.income, prevHas, k),
     expCmp: compareWithPrev(s.out, ps.out, prevHas, k),
-    pendFixed: sum(S.fixed.filter(f => !s.fp[f.id])),
-    pendFixedN: S.fixed.filter(f => !s.fp[f.id]).length,
+    pendFixed: sum(fixedIn(k).filter(f => !s.fp[f.id])),
+    pendFixedN: fixedIn(k).filter(f => !s.fp[f.id]).length,
     debt: { has: S.loans.length > 0, total: nw.debt, active: loans.filter(l => l.balance > 0).length,
             fees: sum(S.loans.filter((l, i) => loans[i].balance > 0), l => l.fee) },
     sav: { has: S.pots.length > 0, total: nw.pots, net: s.potIn - s.potOut,
@@ -819,6 +825,9 @@ function hbars(items){
 }
 
 /* ---------- Formularios ---------- */
+const fixedIn = k => S.fixed.filter(f => f.from <= k && (!f.to || k <= f.to));
+const monthsBetween = (a, b) => { const [y1,m1] = a.split('-').map(Number), [y2,m2] = b.split('-').map(Number); return (y2 - y1) * 12 + (m2 - m1); };
+const fixedGroup = f => S.fixed.filter(x => (x.gid || x.id) === (f.gid || f.id));
 const dateDefault = () => ui.month === todayKey ? todayStr : ui.month + '-01';
 const COLL = { extras:()=>S.extras, rides:()=>S.rides, expenses:()=>S.expenses, fixed:()=>S.fixed, loans:()=>S.loans, pots:()=>S.pots, invest:()=>S.invest, brokers:()=>S.brokers };
 const FORMKIND = { extras:'income', rides:'income', expenses:'expenses', fixed:'fixed', loans:'loans', pots:'pot', invest:'inv', brokers:'broker' };
@@ -858,12 +867,26 @@ const FORMS = {
     valid:v => !v.desc.trim() ? 'Escribe una descripción.' : v.amount > 0 || 'Ingresa un monto mayor a 0.',
   },
   fixed: {
-    coll:'fixed', title:'Gasto fijo', desc:'Se agrega a tu lista mensual. Márcalo cuando lo pagues.',
+    coll:'fixed',
+    title:c => c && c.edit ? 'Editar gasto fijo' : 'Gasto fijo',
+    desc:c => c && c.edit ? `Los cambios aplican desde ${monthName(ui.month)} en adelante. Los meses anteriores se quedan como estaban.` : `Empieza en ${monthName(ui.month)} y se repite cada mes. Márcalo cuando lo pagues.`,
     fields:() => [
       {n:'name', l:'Nombre', t:'text', ph:'Ej: Netflix, Plan Movistar…'},
       {n:'amount', l:'Monto mensual', t:'money'},
-      {n:'day', l:'Día de pago (opcional)', t:'num', ph:'1 – 31'}],
-    defaults:() => ({name:'', amount:'', day:''}),
+      {n:'day', l:'Día de pago (opcional)', t:'num', ph:'1 – 31'},
+      {n:'months', l:'Durante cuántos meses (opcional)', t:'num', ph:'Vacío = sin fin. Ej: 2 cuotas → 2'}],
+    defaults:() => ({name:'', amount:'', day:'', months:''}),
+    save:(v, c) => {
+      const k = ui.month, n = Math.floor(v.months) || 0, to = n > 0 ? shift(k, n - 1) : null;
+      const data = {name:v.name.trim(), amount:v.amount, day:v.day || ''};
+      const f = c.item;
+      if (!f){ S.fixed.push({id:uid(), ...data, from:k, to}); return; }
+      if (f.from === k){ Object.assign(f, data, {to}); return; }
+      /* el mes anterior queda cerrado con los valores viejos; desde este mes rige la versión nueva */
+      const g = f.gid || f.id, nf = {id:uid(), gid:g, ...data, from:k, to};
+      f.gid = g; f.to = shift(k, -1); S.fixed.push(nf);
+      Object.keys(S.fixedPaid).forEach(m => { if (m >= k && S.fixedPaid[m][f.id]){ S.fixedPaid[m][nf.id] = S.fixedPaid[m][f.id]; delete S.fixedPaid[m][f.id]; } });
+    },
     valid:v => !v.name.trim() ? 'Escribe un nombre.' : v.amount > 0 || 'Ingresa un monto mayor a 0.',
   },
   loans: {
@@ -1107,6 +1130,7 @@ function openForm(kind, id, extra){
     if (id && def.coll) item = COLL[def.coll]().find(x => x.id === id) || null;
     vals = item ? {...item} : def.defaults(extra);
     if (kind === 'inv' && item) vals.date = item.start || '';
+    if (kind === 'fixed' && item) vals.months = item.to ? monthsBetween(ui.month, item.to) + 1 : '';
   }
   if (kind === 'pot') ctx.pk = item ? item.kind : extra.kind;
   formCtx = {kind, item, edit:!!item, extra, vals, ...ctx};
@@ -1318,19 +1342,19 @@ function vGastos(){
 }
 
 function vFijos(){
-  const k = ui.month, fp = S.fixedPaid[k] || {}, total = sum(S.fixed), paid = sum(S.fixed.filter(f => fp[f.id]));
-  const done = S.fixed.filter(f => fp[f.id]).length;
+  const k = ui.month, fp = S.fixedPaid[k] || {}, list = fixedIn(k), total = sum(list), paid = sum(list.filter(f => fp[f.id]));
+  const done = list.filter(f => fp[f.id]).length;
   return `
   <div class="grid g4">
-    ${kpi('Total mensual', money(total), `${S.fixed.length} gasto(s) fijo(s)`)}
-    ${kpi('Pagado', money(paid), `${done} de ${S.fixed.length}`, 'pos')}
+    ${kpi('Total mensual', money(total), `${list.length} gasto(s) fijo(s)`)}
+    ${kpi('Pagado', money(paid), `${done} de ${list.length}`, 'pos')}
     ${kpi('Pendiente', money(total - paid), '', total - paid ? 'neg' : '')}
     <div class="card kpi"><div class="l">Progreso del mes</div><div class="v">${total ? Math.round(paid/total*100) : 0}%</div><div class="progress green" style="margin-top:12px"><div style="width:${total ? paid/total*100 : 0}%"></div></div></div>
   </div>
   <div class="card"><h3>Lista de gastos fijos <button class="btn btn-primary btn-sm" data-a="add" data-k="fixed">+ Agregar</button></h3>
-  ${S.fixed.length ? S.fixed.map(f => { const p = fp[f.id]; return `<div class="fx ${p ? 'done' : ''}"><button class="chk ${p ? 'on' : ''}" data-a="togglefixed" data-id="${f.id}" aria-label="Marcar pagado"><svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg></button>
-    <div class="n"><b>${esc(f.name)}</b><small>${p ? 'Pagado el ' + dShort(p.date) : (f.day ? 'Día ' + f.day + ' de cada mes' : 'Pendiente')}</small></div>
-    <div class="a">${money(f.amount)}</div><div>${delBtn('fixed', f.id)}</div></div>`; }).join('') : emptyBox('Aún no tienes gastos fijos', 'Agrega Netflix, tu plan de celular, arriendo… y márcalos cuando los pagues.')}</div>`;
+  ${list.length ? list.map(f => { const p = fp[f.id]; return `<div class="fx ${p ? 'done' : ''}"><button class="chk ${p ? 'on' : ''}" data-a="togglefixed" data-id="${f.id}" aria-label="Marcar pagado"><svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg></button>
+    <div class="n"><b>${esc(f.name)}</b><small>${p ? 'Pagado el ' + dShort(p.date) : (f.day ? 'Día ' + f.day + ' de cada mes' : 'Pendiente')}${f.to ? ' · hasta ' + monthName(f.to) : ''}</small></div>
+    <div class="a">${money(f.amount)}</div><div>${delBtn('fixed', f.id)}</div></div>`; }).join('') : (S.fixed.length ? emptyBox('Sin gastos fijos en ' + monthName(k), 'Los gastos fijos que agregues aquí aplican desde este mes en adelante.') : emptyBox('Aún no tienes gastos fijos', 'Agrega Netflix, tu plan de celular, arriendo… y márcalos cuando los pagues.'))}</div>`;
 }
 
 /* ----- Simulador de abonos: vista ----- */
@@ -1731,6 +1755,17 @@ document.addEventListener('click', e => {
     case 'add': openForm(FORMKIND[k] || k, null, {}); break;
     case 'edit': if (k === 'extras' || k === 'rides') openForm('income', id, {coll:k}); else openForm(FORMKIND[k], id); break;
     case 'del': {
+      if (k === 'fixed'){
+        const f = S.fixed.find(x => x.id === id); if (!f) break;
+        const k0 = ui.month;
+        if (!confirm(`¿Quitar “${f.name}” desde ${monthName(k0)} en adelante?\n\nLos meses anteriores se conservan tal cual. Si ya lo marcaste como pagado en ${monthName(k0)} o después, ese pago también se quita.`)) break;
+        fixedGroup(f).forEach(x => {
+          Object.keys(S.fixedPaid).forEach(m => { if (m >= k0) delete S.fixedPaid[m][x.id]; });
+          if (x.from >= k0) S.fixed.splice(S.fixed.indexOf(x), 1);
+          else if (!x.to || x.to >= k0) x.to = shift(k0, -1);
+        });
+        save(); render(); toast('Quitado desde ' + monthName(k0)); break;
+      }
       const arr = COLL[k](), it = arr.find(x => x.id === id); if (!it) break;
       const msg = (k === 'pots' || k === 'invest') ? `¿Eliminar “${it.name}”? Se borrará con todo su historial y tu saldo disponible se recalculará.` : '¿Eliminar este registro?';
       if (confirm(msg)){ arr.splice(arr.indexOf(it), 1); save(); render(); toast('Eliminado'); }
@@ -1889,6 +1924,7 @@ const cloud = {
       this.last = 0;
     }
     this.ready = true;
+    if (legacyFixed){ this.dirty = true; this.schedule(); legacyFixed = false; }
     $('layout').classList.remove('boot'); render();
     pill('✓ Conectado', 'done'); pillHide(1300);
     if (migrated){ this.dirty = true; await this.push(); if (!this.dirty){ try { localStorage.setItem(MIGRATED, '1'); } catch(e){} toast('Tus datos se subieron a la nube'); } }
