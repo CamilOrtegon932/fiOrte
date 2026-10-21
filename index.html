@@ -287,11 +287,44 @@
   .toast{position:fixed;bottom:28px;left:50%;transform:translate(-50%,24px);background:var(--dark);color:var(--bg);padding:11px 20px;border-radius:99px;font-weight:500;opacity:0;pointer-events:none;transition:.3s;z-index:90}
   .toast.show{opacity:1;transform:translate(-50%,0)}
   @media (max-width:1100px){ .split32{grid-template-columns:1fr} }
-  @media (max-width:900px){ .layout{grid-template-columns:1fr} aside{position:static;height:auto} main{padding:0 16px 40px} .g2,.g3{grid-template-columns:1fr} .loans,.pots{grid-template-columns:1fr} }
+  .menu-btn,.scrim{display:none}
+  .menu-btn{border:0;background:var(--fill);width:38px;height:38px;border-radius:10px;cursor:pointer;flex:none;align-items:center;justify-content:center;padding:0}
+  .menu-btn svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round}
+  .tb-actions{display:flex;align-items:center;gap:10px}
+  .tb-month{display:contents}
+  @media (max-width:900px){
+    html,body{overflow-x:hidden}
+    .layout{grid-template-columns:minmax(0,1fr)}
+    aside{position:fixed;left:0;top:0;bottom:0;width:min(290px,84vw);height:auto;z-index:70;transform:translateX(-102%);transition:transform .28s cubic-bezier(.2,.8,.2,1);background:var(--card);padding-top:calc(22px + env(safe-area-inset-top))}
+    body.menu aside{transform:none;box-shadow:0 0 60px rgba(0,0,0,.35)}
+    .scrim{display:block;position:fixed;inset:0;background:var(--overlay);z-index:65;opacity:0;pointer-events:none;transition:opacity .25s}
+    body.menu .scrim{opacity:1;pointer-events:auto}
+    .menu-btn{display:inline-flex}
+    main{padding:0 14px calc(40px + env(safe-area-inset-bottom))}
+    .toolbar{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"menu title acts" "month month month";gap:10px 10px;padding:calc(12px + env(safe-area-inset-top)) 0 10px}
+    .toolbar .menu-btn{grid-area:menu}
+    .toolbar h1{grid-area:title;font-size:22px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .toolbar .tb-actions{grid-area:acts}
+    .toolbar .tb-month{grid-area:month;display:flex;gap:8px}
+    .toolbar .tb-month .seg{flex:1;min-width:0}
+    .toolbar .tb-month .seg .mname{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .toolbar .btn{padding:9px 12px;font-size:13px}
+    .toolbar .lg{display:none}
+    .g2,.g3{grid-template-columns:1fr} .loans,.pots{grid-template-columns:1fr}
+    .g4{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+    .card{padding:16px;overflow-x:auto}
+    .hero{padding:22px 20px;gap:16px}
+    .hero .hbox{min-width:0;width:100%}
+    .hero .side{text-align:left;max-width:none;width:100%}
+    .modal{width:94vw;padding:20px;max-height:90vh}
+    .toast,.conn{max-width:92vw;white-space:normal;text-align:center}
+  }
+  @media (max-width:420px){ .g4{grid-template-columns:1fr 1fr} .card{padding:14px} .toolbar .btn{padding:8px 10px} }
 </style>
 </head>
 <body>
 <div class="layout boot" id="layout">
+  <div class="scrim" data-a="menu"></div>
   <aside>
     <div class="brand">Finanzas</div>
     <nav class="nav" id="nav"></nav>
@@ -302,15 +335,20 @@
   </aside>
   <main>
     <div class="toolbar">
+      <button class="menu-btn" data-a="menu" aria-label="Menú"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
       <h1 id="title"></h1>
-      <div class="seg">
-        <button data-a="prev" aria-label="Mes anterior">‹</button>
-        <span class="mname" id="mname"></span>
-        <button data-a="next" aria-label="Mes siguiente">›</button>
+      <div class="tb-month">
+        <div class="seg">
+          <button data-a="prev" aria-label="Mes anterior">‹</button>
+          <span class="mname" id="mname"></span>
+          <button data-a="next" aria-label="Mes siguiente">›</button>
+        </div>
+        <button class="btn btn-soft" data-a="today">Hoy</button>
       </div>
-      <button class="btn btn-soft" data-a="today">Hoy</button>
-      <button class="btn btn-dark" data-a="add" data-k="expenses">− Gasto</button>
-      <button class="btn btn-primary" data-a="addmoney">+ Agregar dinero</button>
+      <div class="tb-actions">
+        <button class="btn btn-dark" data-a="add" data-k="expenses">− Gasto</button>
+        <button class="btn btn-primary" data-a="addmoney">+ Agregar<span class="lg"> dinero</span></button>
+      </div>
     </div>
     <div id="view"></div>
   </main>
@@ -1747,7 +1785,8 @@ document.addEventListener('click', e => {
   if (el.tagName === 'A') e.preventDefault();
   const a = el.dataset.a, k = el.dataset.k, id = el.dataset.id;
   switch (a){
-    case 'nav': ui.view = el.dataset.v; render(); window.scrollTo(0,0); break;
+    case 'nav': ui.view = el.dataset.v; document.body.classList.remove('menu'); render(); window.scrollTo(0,0); break;
+    case 'menu': document.body.classList.toggle('menu'); break;
     case 'prev': ui.month = shift(ui.month,-1); render(); break;
     case 'next': ui.month = shift(ui.month,1); render(); break;
     case 'today': ui.month = todayKey; render(); break;
