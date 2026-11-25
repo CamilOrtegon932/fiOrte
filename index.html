@@ -638,6 +638,7 @@ const ENTITIES = {
   nu:         {name:'Nu',           logo:'logos/nu.svg',          color:'#820ad1'},
   nequi:      {name:'Nequi',        logo:'logos/nequi.svg',       color:'#da0081'},
   rappipay:   {name:'RappiPay',     logo:'logos/rappi.svg',       color:'#ff441f'},
+  davivienda: {name:'Davivienda',   logo:'logos/davivienda.svg',  color:'#ed1c27'},
   otra:       {name:'Otra entidad', logo:null,                   color:'#8e8e93'},
 };
 const ATYPES = {efectivo:'Efectivo', ahorros:'Cuenta de ahorros', digital:'Cuenta digital', credito:'Tarjeta de crédito'};
@@ -645,6 +646,7 @@ const ACC_STARTER = [
   ['Efectivo','efectivo','efectivo'], ['RappiPay Ahorros','rappipay','ahorros'], ['Bancolombia Ahorros','bancolombia','ahorros'],
   ['Nu Ahorros','nu','ahorros'], ['Nequi Ahorros','nequi','ahorros'], ['RappiCard Crédito','rappipay','credito'],
   ['Única Bancolombia Crédito','bancolombia','credito'], ['Nu Crédito','nu','credito'],
+  ['Davivienda Ahorros','davivienda','ahorros'], ['Davivienda Crédito','davivienda','credito'],
 ];
 const isCredit = a => a.type === 'credito';
 const entOf = a => ENTITIES[a.entity] || ENTITIES.otra;
