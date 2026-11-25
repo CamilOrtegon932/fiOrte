@@ -301,6 +301,9 @@ document.documentElement.dataset.theme = window.matchMedia && matchMedia('(prefe
   .modal input:focus,.modal select:focus{border-color:var(--accent)}
   .modal select{appearance:none;-webkit-appearance:none;cursor:pointer;padding-right:36px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none' stroke='%238e8e93' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l5 5 5-5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 13px center;background-size:12px 8px}
   .modal select:disabled{opacity:.6;cursor:default}
+  .modal label.mini{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin:-6px 0 12px;font-weight:500}
+  .modal label.mini span{flex:none}
+  .modal label.mini select{width:auto;min-width:0;max-width:62%;margin:0;padding:6px 30px 6px 10px;min-height:32px;font-size:12.5px;font-weight:600;text-overflow:ellipsis;background-position:right 10px center}
   .modal select option,.modal select optgroup{background-color:var(--card);color:var(--text)}
   .segc{display:flex;gap:2px;background:var(--fill);border-radius:11px;padding:3px;margin-bottom:16px}
   .segc button{flex:1;border:0;background:none;padding:8px 6px;border-radius:9px;font-weight:600;font-size:13px;cursor:pointer;color:var(--muted);transition:.15s}
@@ -648,6 +651,10 @@ const inM = (a, k) => a.filter(x => x.date.slice(0,7) === k);
 /* Neto del repartidor = ganancias − gasolina − rodamientos − otros costos operativos (Fase 4). Estos costos NO se registran también como gasto. */
 const rideOpex = r => (r.fuel || 0) + (r.bearings || 0) + (r.other || 0);
 const rideNet = r => (r.gross || 0) - rideOpex(r);
+/* Si los costos se pagaron aparte (r.cacc = cuenta o tarjeta), la cuenta receptora recibe la ganancia completa y el costo sale de r.cacc.
+   Sin cacc (registros anteriores o "descontados de las ganancias"), la receptora recibe el neto, como siempre. El ingreso del mes es el neto en ambos casos. */
+const rideIn = r => r.cacc ? (r.gross || 0) : rideNet(r);
+const costDesc = r => !(r.bearings || r.other) ? 'Gasolina de jornada' : 'Costos de jornada';
 const payTotal = p => (p.capital||0) + (p.interest||0) + (p.insurance||0);
 
 function stats(k){
@@ -667,7 +674,7 @@ function stats(k){
   const income = extrasT + net, out = expT + fixedT + loanT + chgT;
   const alloc = potIn + invIn - potOut - invOut;
   /* Tarjetas (Fase 3): una compra con tarjeta ES gasto del mes, pero no saca efectivo; el efectivo sale cuando pagas la tarjeta. */
-  const cardT = sum(gx.filter(x => isCardAcc(x.acc))) + sum(Object.values(fp).filter(p => isCardAcc(p.acc))) + chgT;
+  const cardT = sum(gx.filter(x => isCardAcc(x.acc))) + sum(Object.values(fp).filter(p => isCardAcc(p.acc))) + sum(rd.filter(r => isCardAcc(r.cacc)), rideOpex) + chgT;
   const ccp = S.ccPays.filter(p => p.date.slice(0,7) === k), ccPayT = sum(ccp);
   return { ex, rd, gx, fp, pays, potTx, invTx, potIn, potOut, invIn, invOut, alloc, extrasT, gross, fuel, opex, net, expT, fixedT, loanT, chg, chgT, income, out, cardT, ccp, ccPayT,
            flow: income - out - alloc + cardT - ccPayT };
@@ -867,7 +874,7 @@ function accMoves(a){
     ...ccPays(a).map(p => ({date:p.date, amount:-p.amount}))];             // pago: baja la deuda
   return [
     ...S.extras.filter(x => x.acc === a.id).map(x => ({date:x.date, amount:x.amount})),              // ingreso recibido en esta cuenta
-    ...S.rides.filter(r => r.acc === a.id).map(r => ({date:r.date, amount:rideNet(r)})),             // neto del repartidor recibido aquí
+    ...S.rides.filter(r => r.acc === a.id).map(r => ({date:r.date, amount:rideIn(r)})),              // repartidor recibido aquí (los costos pagados aparte salen vía spends)
     ...spends().filter(x => x.acc === a.id).map(x => ({date:x.date, amount:-x.amount})),            // gasto pagado desde esta cuenta
     ...S.ccPays.filter(p => p.from === a.id).map(p => ({date:p.date, amount:-p.amount})),           // pago de tarjeta desde esta cuenta
     ...S.transfers.filter(t => t.from === a.id).map(t => ({date:t.date, amount:-t.amount})),        // transferencia que sale (la comisión va como gasto vinculado)
@@ -917,6 +924,8 @@ function spends(){
   Object.keys(S.fixedPaid).forEach(m => Object.entries(S.fixedPaid[m] || {}).forEach(([id, p]) => {
     if (p && p.acc){ const f = S.fixed.find(x => x.id === id); out.push({id:`fx-${m}-${id}`, desc:'Fijo · ' + (f ? f.name : ''), amount:p.amount, date:p.date, acc:p.acc, fixed:true}); }
   }));
+  /* Costos de una jornada pagados con una cuenta o tarjeta: no son un gasto aparte (ya restan en el neto), pero sí mueven esa cuenta. */
+  S.rides.forEach(r => { if (r.cacc && rideOpex(r) > 0) out.push({id:`rd-${r.id}`, desc:costDesc(r), amount:rideOpex(r), date:r.date, acc:r.cacc, ride:true}); });
   return out;
 }
 const isCardAcc = id => { const a = id && S.accounts.find(x => x.id === id); return !!a && isCredit(a); };
@@ -943,7 +952,7 @@ function incomeCheck(v, item, amount){
 /* Al editar o borrar un ingreso, la cuenta que lo recibió no puede quedar negativa (ese dinero ya se pudo gastar). */
 function keepCheck(item, newAmount){
   const a = item && item.acc && S.accounts.find(x => x.id === item.acc); if (!a || item.date < a.since) return true;
-  const old = item.gross != null ? rideNet(item) : item.amount, b = accInfo(a, '9999-12-31').bal - old + newAmount;
+  const old = item.gross != null ? rideIn(item) : item.amount, b = accInfo(a, '9999-12-31').bal - old + newAmount;
   return b >= 0 ? true : `${a.name} quedaría en ${money(b)}: parte de ese dinero ya se usó desde esa cuenta.`;
 }
 /* Trabajo fijo / salario (Fase 4): misma lógica que los gastos fijos (definición con vigencia + marca por periodo), pero el pago
@@ -1025,7 +1034,7 @@ function accTotals(asOf = todayStr){
            debt: sum(ci, i => i.debt), limit: sum(ci, i => i.limit), avail: sum(ci, i => i.avail), nCash: cash.length, nCards: cards.length };
 }
 /* Registros que apuntan a una cuenta (campos acc/from/to). Si hay alguno, la cuenta no se puede eliminar, solo archivar. */
-const accRefs = id => [S.expenses, S.extras, S.rides, S.pots, S.invest, S.transfers || [], S.ccPays, S.ccStmts, S.fixed, S.recInc, Object.values(S.fixedPaid).flatMap(o => Object.values(o || {}))].flat().filter(x => x && (x.acc === id || x.from === id || x.to === id || x.card === id)).length;
+const accRefs = id => [S.expenses, S.extras, S.rides, S.pots, S.invest, S.transfers || [], S.ccPays, S.ccStmts, S.fixed, S.recInc, Object.values(S.fixedPaid).flatMap(o => Object.values(o || {}))].flat().filter(x => x && (x.acc === id || x.cacc === id || x.from === id || x.to === id || x.card === id)).length;
 
 /* Inversiones */
 function invInfo(h, asOf = todayStr){
@@ -1326,20 +1335,27 @@ const FORMS = {
       {n:'src', t:'seg', rerender:true, opts:[...(modOn('repartidor') ? [['repartidor','Repartidor']] : []), ['independiente','Independiente'],['otro','Otro ingreso']]},
       {n:'date', l:'Fecha', t:'date'},
       ...(v.src === 'repartidor'
-        ? [{n:'gross', l:'Ganancias del día (lo que te pagó la app)', t:'money'}, {n:'fuel', l:'Gasolina', t:'money'}, {n:'bearings', l:'Rodamientos (opcional)', t:'money'},
+        ? [{n:'gross', l:'Ganancias del día (lo que te pagó la app)', t:'money'}, {n:'fuel', l:'Gasolina', t:'money'},
+           ...(S.accounts.length ? [{n:'cacc', l:'Costos pagados con', t:'mini', opts:[['', 'Descontados de las ganancias'], ...spendAccs(v.cacc).map(a => [a.id, a.name + (isCredit(a) ? ' (tarjeta)' : '')])]}] : []),
+           {n:'bearings', l:'Rodamientos (opcional)', t:'money'},
            {n:'other', l:'Otros costos operativos (opcional)', t:'money'}, {n:'note', l:'Nota (opcional)', t:'text', ph:'Ej: Rappi, zona norte…'}]
         : [{n:'desc', l:'Descripción', t:'text', ph: v.src === 'otro' ? 'Ej: me envió mi mamá, venta de algo…' : 'Ej: diseño de logo, arreglo de computador…'},
            {n:'client', l: v.src === 'otro' ? 'De quién o de dónde (opcional)' : 'Cliente, proyecto o actividad (opcional)', t:'text'},
            {n:'amount', l:'Monto', t:'money'}, {n:'note', l:'Nota (opcional)', t:'text'}]),
       {n:'acc', l:'¿En qué cuenta lo recibiste?', t:'acc', accs:incAccs(v.acc), none: formCtx && formCtx.item && !formCtx.item.acc ? 'Sin cuenta (registro anterior)' : null}],
     defaults:x => { let src = x.src || 'repartidor'; if (src === 'repartidor' && !modOn('repartidor')) src = 'independiente'; const d = S.settings.incAcc[src];
-      return {src, date:dateDefault(), gross:'', fuel:'', bearings:'', other:'', amount:'', desc:'', client:'', note:'', acc: d && incAccs().some(a => a.id === d) ? d : ''}; },
+      const cd = S.settings.costAcc; /* con qué se pagaron los costos la última vez */
+      return {src, date:dateDefault(), gross:'', fuel:'', bearings:'', other:'', amount:'', desc:'', client:'', note:'', acc: d && incAccs().some(a => a.id === d) ? d : '', cacc: cd && S.accounts.some(a => a.id === cd && !a.archived) ? cd : ''}; },
     hint:v => {
-      const net = v.src === 'repartidor' ? rideNet(v) : v.amount, a = S.accounts.find(x => x.id === v.acc);
-      const head = v.src === 'repartidor' && (v.gross || rideOpex(v)) ? `Neto del día: ${money(net)} (ganancias − ${money(rideOpex(v))} de costos operativos)` : '';
-      const own = formCtx.item && formCtx.item.acc === v.acc ? (formCtx.item.gross != null ? rideNet(formCtx.item) : formCtx.item.amount) : 0;
-      const tail = a && net > 0 ? `${a.name} quedará en ${money(accInfo(a).bal - own + net)}` : '';
-      return [head, tail].filter(Boolean).join(' · '); },
+      const ride = v.src === 'repartidor', net = ride ? rideNet(v) : v.amount, a = S.accounts.find(x => x.id === v.acc);
+      const c = ride && v.cacc !== v.acc && rideOpex(v) > 0 ? S.accounts.find(x => x.id === v.cacc) : null;
+      const into = c ? v.gross : net, it = formCtx.item;
+      const head = ride && (v.gross || rideOpex(v)) ? `Neto del día: ${money(net)} (ganancias − ${money(rideOpex(v))} de costos operativos)` : '';
+      const own = it && it.acc === v.acc ? (it.gross != null ? rideIn(it) : it.amount) : 0;
+      const tail = a && into > 0 ? `${a.name} quedará en ${money(accInfo(a).bal - own + into)}` : '';
+      const paid = c && it && it.cacc === c.id ? rideOpex(it) : 0;
+      const cost = !c ? '' : isCredit(c) ? `Deuda de ${c.name}: ${money(accInfo(c).debt - paid + rideOpex(v))}` : `${c.name} quedará en ${money(accInfo(c).bal + paid - rideOpex(v))}`;
+      return [head, tail, cost].filter(Boolean).join(' · '); },
     valid:v => {
       if (v.src === 'repartidor'){
         if (!(v.gross > 0)) return 'Ingresa las ganancias del día.';
@@ -1349,13 +1365,19 @@ const FORMS = {
         if (!String(v.desc || '').trim()) return 'Escribe una descripción.';
         if (!(v.amount > 0)) return 'Ingresa un monto mayor a 0.';
       }
-      return incomeCheck(v, formCtx.item, v.src === 'repartidor' ? rideNet(v) : v.amount);
+      const apart = v.src === 'repartidor' && v.cacc && v.cacc !== v.acc && rideOpex(v) > 0;
+      if (apart){ const r = spendCheck(v.cacc, v.date, rideOpex(v), formCtx.item && formCtx.item.cacc === v.cacc ? rideOpex(formCtx.item) : 0); if (r !== true) return r; }
+      return incomeCheck(v, formCtx.item, v.src === 'repartidor' ? (apart ? v.gross : rideNet(v)) : v.amount);
     },
     save:(v, c) => {
       const t = x => String(x || '').trim(), acc = v.acc || undefined;
       const rd = {date:v.date, gross:v.gross, fuel:v.fuel || 0, bearings:v.bearings || 0, other:v.other || 0, note:t(v.note)};
       const ex = {date:v.date, amount:v.amount, desc:t(v.desc), client:t(v.client), note:t(v.note)};
-      if (c.item){ delete c.item.acc; Object.assign(c.item, c.coll === 'rides' ? rd : ex, acc ? {acc} : {}); }
+      if (v.src === 'repartidor'){
+        if (v.cacc && v.cacc !== v.acc && rideOpex(rd) > 0) rd.cacc = v.cacc;
+        if (v.cacc !== undefined && rideOpex(rd) > 0) S.settings.costAcc = v.cacc;
+      }
+      if (c.item){ delete c.item.acc; delete c.item.cacc; Object.assign(c.item, c.coll === 'rides' ? rd : ex, acc ? {acc} : {}); }
       else if (v.src === 'repartidor') S.rides.push({id:uid(), ...rd, ...(acc ? {acc} : {})});
       else S.extras.push({id:uid(), type:v.src, ...ex, ...(acc ? {acc} : {})});
       if (acc) S.settings.incAcc[v.src] = acc; /* la última cuenta usada queda como predeterminada de esa fuente */
@@ -1854,6 +1876,8 @@ function fieldHTML(f, val){
   if (f.t === 'money') return `<label>${esc(f.l)}<input name="${f.n}" data-money inputmode="numeric" autocomplete="off" placeholder="$ 0" value="${val ? fmt(val) : ''}"></label>`;
   if (f.t === 'num') return `<label>${esc(f.l)}<input name="${f.n}" type="number" min="0" step="${f.step || 1}" inputmode="decimal" placeholder="${esc(f.ph || '')}" value="${val ? esc(val) : ''}"></label>`;
   if (f.t === 'date') return `<label>${esc(f.l)}<input name="${f.n}" type="date" value="${esc(val)}"></label>`;
+  /* Selector discreto de una sola línea: al tocarlo abre la lista */
+  if (f.t === 'mini') return `<label class="mini"><span>${esc(f.l)}</span><select name="${f.n}">${f.opts.map(o => `<option value="${esc(o[0])}" ${o[0] === val ? 'selected' : ''}>${esc(o[1])}</option>`).join('')}</select></label>`;
   /* Selector de cuenta con logo (reutilizable para "¿Cómo pagaste?" y cuentas receptoras) */
   if (f.t === 'acc'){
     const rr = f.rerender ? ' data-rr="1"' : '';
@@ -1897,7 +1921,7 @@ function openForm(kind, id, extra){
   if (kind === 'income' && id){
     item = COLL[extra.coll]().find(x => x.id === id); ctx.coll = extra.coll;
     vals = extra.coll === 'rides'
-      ? {src:'repartidor', date:item.date, gross:item.gross, fuel:item.fuel || 0, bearings:item.bearings || 0, other:item.other || 0, note:item.note || '', acc:item.acc || ''}
+      ? {src:'repartidor', date:item.date, gross:item.gross, fuel:item.fuel || 0, bearings:item.bearings || 0, other:item.other || 0, note:item.note || '', acc:item.acc || '', cacc:item.cacc || ''}
       : {src:item.type, date:item.date, amount:item.amount, desc:item.desc || '', client:item.client || '', note:item.note || '', acc:item.acc || ''};
   } else {
     if (id && def.coll) item = COLL[def.coll]().find(x => x.id === id) || null;
@@ -1979,8 +2003,8 @@ function movesOf(k){
   const s = stats(k), cn = id => (S.accounts.find(a => a.id === id) || {}).name || '';
   return [
     ...s.ex.map(x => ({d:x.date, t:x.desc || srcOf(x.type)[1], cat:srcOf(x.type)[1], ty:'ingreso', v:x.amount, acc:x.acc, i:srcOf(x.type)[2]})),
-    ...s.rd.map(x => modOn('repartidor') ? {d:x.date, t:'Repartidor' + (x.note ? ' · ' + x.note : ''), cat:'Repartidor', ty:'ingreso', v:rideNet(x), acc:x.acc, i:'🛵'}
-      : {d:x.date, t:'Ingreso' + (x.note ? ' · ' + x.note : ''), cat:'Otros ingresos', ty:'ingreso', v:rideNet(x), acc:x.acc, i:'💰'}),
+    ...s.rd.map(x => modOn('repartidor') ? {d:x.date, t:'Repartidor' + (x.note ? ' · ' + x.note : ''), cat:'Repartidor', ty:'ingreso', v:rideNet(x), acc:x.acc, acc2:x.cacc, cost:true, i:'🛵'}
+      : {d:x.date, t:'Ingreso' + (x.note ? ' · ' + x.note : ''), cat:'Otros ingresos', ty:'ingreso', v:rideNet(x), acc:x.acc, acc2:x.cacc, cost:true, i:'💰'}),
     ...s.gx.map(x => ({d:x.date, t:x.desc, cat:x.cat, ty:'gasto', v:-x.amount, acc:x.acc, i:'🧾'})),
     ...S.fixed.filter(f => s.fp[f.id]).map(f => ({d:s.fp[f.id].date, t:'Fijo · ' + f.name, cat:'Gasto fijo', ty:'fijo', v:-s.fp[f.id].amount, acc:s.fp[f.id].acc, i:'📌'})),
     ...s.pays.map(p => ({d:p.date, t:'Préstamo · ' + p.loan, cat:'Préstamos', ty:'prestamo', v:-payTotal(p), acc:p.acc, i:'🏦'})),
@@ -2007,7 +2031,7 @@ function movesCard(k){
     ${Object.values(f).some(Boolean) ? '<button class="btn btn-soft btn-sm" data-a="mfclear">Quitar filtros</button>' : ''}</div>`;
   /* El logo de la entidad va una sola vez, junto al nombre de la cuenta o tarjeta */
   const row = m => `<tr><td class="c-main">${esc(m.t)}<div class="muted" style="font-size:12px">${dShort(m.d)} · ${MTYPES[m.ty]}${m.cat !== MTYPES[m.ty] ? ' · ' + esc(m.cat) : ''}</div></td>
-      <td class="c-meta">${m.acc ? payTag(m.acc) : `<span class="muted">${m.ty === 'ahorro' || m.ty === 'inversion' ? 'Fuera de tus cuentas' : 'Sin cuenta'}</span>`}${m.acc2 ? ` <span class="muted">→</span> ${payTag(m.acc2)}` : ''}</td>
+      <td class="c-meta">${m.acc ? payTag(m.acc) : `<span class="muted">${m.ty === 'ahorro' || m.ty === 'inversion' ? 'Fuera de tus cuentas' : 'Sin cuenta'}</span>`}${m.acc2 ? ` <span class="muted">${m.cost ? '· costos con' : '→'}</span> ${payTag(m.acc2)}` : ''}</td>
       <td class="r c-amt ${m.n ? 'neu' : m.v < 0 ? 'neg' : 'pos'}"><b>${m.v < 0 ? '−' : '+'} ${money(Math.abs(m.v))}</b></td></tr>`;
   return `<div class="card" style="margin-bottom:16px"><h3>Movimientos del mes <span>${list.length === all.length ? all.length + ' en total' : list.length + ' de ' + all.length}</span></h3>${bar}
     ${list.length ? `<div class="scroll"><table class="movt ltab"><tbody>${list.map(row).join('')}</tbody></table></div>` : emptyBox(all.length ? 'Ningún movimiento con esos filtros' : 'Aún no hay movimientos', all.length ? 'Cambia o quita los filtros.' : 'Agrega dinero o registra un gasto para empezar.')}
@@ -2178,7 +2202,7 @@ function vRepartidor(){
   <div class="card"><h3>Jornadas <button class="btn btn-primary btn-sm" data-a="addmoney" data-src="repartidor">+ Registrar jornada</button></h3>
   ${rows.length ? `<table class="ltab"><thead><tr><th>Fecha</th><th>Nota</th><th class="r">Ganancias</th><th class="r">Gasolina</th><th class="r">Otros costos</th><th class="r">Neto</th><th>Recibido en</th><th></th></tr></thead><tbody>
     ${rows.map(r => { const ot = (r.bearings || 0) + (r.other || 0), m = x => x ? '− ' + money(x).replace('− ','') : '—';
-      return `<tr><td class="c-main"><b>${dShort(r.date)}</b></td><td class="c-meta" style="color:var(--muted)">${esc(r.note)}</td><td class="r c-meta" data-l="Ganancias">${money(r.gross)}</td><td class="r neg c-meta" data-l="Gasolina">${m(r.fuel)}</td><td class="r neg c-meta" data-l="Otros" title="${r.bearings ? 'Rodamientos ' + money(r.bearings) : ''}${r.other ? ' · otros ' + money(r.other) : ''}">${m(ot)}</td><td class="r pos c-amt"><b>${money(rideNet(r))}</b></td><td class="c-meta">${payTag(r.acc)}</td><td class="act c-act">${delBtn('rides', r.id)}</td></tr>`; }).join('')}</tbody></table>` : emptyBox('Sin jornadas este mes', 'Registra lo que ganaste hoy y tus costos operativos (gasolina, rodamientos…).')}
+      return `<tr><td class="c-main"><b>${dShort(r.date)}</b></td><td class="c-meta" style="color:var(--muted)">${esc(r.note)}</td><td class="r c-meta" data-l="Ganancias">${money(r.gross)}</td><td class="r neg c-meta" data-l="Gasolina">${m(r.fuel)}</td><td class="r neg c-meta" data-l="Otros" title="${r.bearings ? 'Rodamientos ' + money(r.bearings) : ''}${r.other ? ' · otros ' + money(r.other) : ''}">${m(ot)}</td><td class="r pos c-amt"><b>${money(rideNet(r))}</b></td><td class="c-meta">${payTag(r.acc)}${r.cacc ? `<div class="muted" style="font-size:12px">costos con ${payTag(r.cacc)}</div>` : ''}</td><td class="act c-act">${delBtn('rides', r.id)}</td></tr>`; }).join('')}</tbody></table>` : emptyBox('Sin jornadas este mes', 'Registra lo que ganaste hoy y tus costos operativos (gasolina, rodamientos…).')}
   <p class="note" style="margin:10px 0 0">Los costos operativos se restan aquí para calcular el neto; no los registres también como gasto. Si la app ya te los descontó, no los vuelvas a poner.</p></div>`;
 }
 
@@ -3436,7 +3460,7 @@ function parseImport(text){
   const lf = legacyFixed;
   try { r.data = normalize(clone(data)); } catch(e){ r.errors.push('No se pudo interpretar el contenido del archivo.'); return r; } finally { legacyFixed = lf; }
   /* referencias a cuentas que no existen en el archivo */
-  const ids = new Set(r.data.accounts.map(a => a.id)), dang = [r.data.expenses, r.data.extras, r.data.rides, r.data.transfers, r.data.ccPays].flat().filter(x => (x.acc && !ids.has(x.acc)) || (x.from && !ids.has(x.from)) || (x.card && !ids.has(x.card))).length;
+  const ids = new Set(r.data.accounts.map(a => a.id)), dang = [r.data.expenses, r.data.extras, r.data.rides, r.data.transfers, r.data.ccPays].flat().filter(x => (x.acc && !ids.has(x.acc)) || (x.cacc && !ids.has(x.cacc)) || (x.from && !ids.has(x.from)) || (x.card && !ids.has(x.card))).length;
   if (dang) r.warnings.push(`${dang} movimiento(s) apuntan a una cuenta que no está en el archivo.`);
   r.rows = fingerprint(r.data).rows;
   return r;
