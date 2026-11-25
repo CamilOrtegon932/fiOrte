@@ -3051,7 +3051,9 @@ let platform = null, authSeq = 0, pollT = null;
 const isAdmin = () => !!session.profile && session.profile.role === 'admin' && session.profile.status !== 'disabled';
 const modAllowed = k => { const m = session.profile && session.profile.modules; return !m || m[k] !== false; };
 const actsOf = () => (session.profile && session.profile.activities) || [];
-const modOn = k => { const mod = MODULES.find(x => x[0] === k); if (!mod) return false; if (mod[3]) return true; if (!session.profile || !modAllowed(k)) return false; return k === 'repartidor' ? actsOf().includes('repartidor') : true; };
+/* Secciones que la propia persona ocultó (se guardan con sus datos; ocultar nunca borra información) */
+const hiddenMods = () => (S && S.settings && Array.isArray(S.settings.hidden)) ? S.settings.hidden : [];
+const modOn = k => { const mod = MODULES.find(x => x[0] === k); if (!mod) return false; if (mod[3]) return true; if (!session.profile || !modAllowed(k) || hiddenMods().includes(k)) return false; return k === 'repartidor' ? actsOf().includes('repartidor') : true; };
 const viewOn = v => v === 'perfil' || v === 'datos' || (v === 'admin' ? isAdmin() : modOn(VIEW_MOD[v] || ''));
 const modulesMap = on => Object.fromEntries(MODULES.map(m => [m[0], m[3] ? true : on(m[0])]));
 function go(v){
@@ -3373,10 +3375,11 @@ function vPerfil(){
   <div class="card" style="margin-bottom:16px"><h3>Cómo recibes ingresos <span>Personaliza lo que ves</span></h3>
     <div class="tiles" role="group" aria-label="Actividades económicas">${ACTIVITIES.map(a => `<button type="button" class="tile ${acts.includes(a[0]) ? 'on' : ''}" data-x="act" data-k="${a[0]}" aria-pressed="${acts.includes(a[0])}"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${a[3]}</svg><span><b>${a[1]}</b><small>${a[2]}</small></span><span class="ck" aria-hidden="true">✓</span></button>`).join('')}</div>
     <p class="note" style="margin:0">Mixto = empleado + independiente. Esto no limita lo que puedes registrar. Si quitas Repartidor, su historial se conserva y reaparece al volver a activarlo.</p></div>
-  <div class="card"><h3>Módulos disponibles <span>Los define el administrador</span></h3>
-    ${MODULES.map(m => { const allowed = m[3] || modAllowed(m[0]), shown = modOn(m[0]);
-      return `<div class="mrow"><div class="mn"><b>${esc(m[1])}</b><small>${esc(m[2])}${!allowed ? ' · desactivado por el administrador' : (!shown ? ' · actívalo eligiendo la actividad correspondiente' : '')}</small></div><span class="pill ${shown ? 'ok' : 'warn'}">${shown ? 'Visible' : 'Oculto'}</span></div>`; }).join('')}
-    <p class="note" style="margin:10px 0 0">Ocultar un módulo no elimina su información.</p></div>`;
+  <div class="card"><h3>Secciones del menú <span>Elige cuáles ver</span></h3>
+    ${MODULES.map(m => { const allowed = m[3] || modAllowed(m[0]), needsAct = m[0] === 'repartidor' && !acts.includes('repartidor'), on = modOn(m[0]), locked = m[3] || !allowed || needsAct;
+      const why = m[3] ? ' · siempre visible' : !allowed ? ' · desactivado por el administrador' : needsAct ? ' · actívalo eligiendo la actividad Repartidor' : '';
+      return `<div class="mrow"><div class="mn"><b>${esc(m[1])}</b><small>${esc(m[2])}${why}</small></div><button class="sw ${on ? 'on' : ''}" ${locked ? 'disabled' : ''} role="switch" aria-checked="${on}" aria-label="Mostrar ${esc(m[1])}" data-x="modvis" data-k="${m[0]}"></button></div>`; }).join('')}
+    <p class="note" style="margin:10px 0 0">Al apagar una sección desaparece del menú y sus tarjetas del Resumen. No se borra nada: lo que ya registraste sigue contando en los totales.</p></div>`;
 }
 
 /* ---------- Vista: Administración (Fase 3) ---------- */
@@ -3616,6 +3619,10 @@ document.addEventListener('click', async e => {
     case 'act': { const k = el.dataset.k, cur = actsOf(), next = cur.includes(k) ? cur.filter(a => a !== k) : [...cur, k];
       if (!next.length) return toast('Elige al menos una actividad');
       try { await platform.db.updateProfile(session.user.uid, { activities:next }); session.profile.activities = next; if (!viewOn(ui.view)) ui.view = 'resumen'; render(); } catch(er){ toast('No se pudo guardar'); } break; }
+    case 'modvis': { const k = el.dataset.k, mod = MODULES.find(m => m[0] === k); if (!mod || mod[3] || !cloud.ready) break;
+      const h = new Set(hiddenMods()), hide = !h.has(k); if (hide) h.add(k); else h.delete(k);
+      S.settings.hidden = [...h]; save(); render(); toast(hide ? `${mod[1]}: oculta del menú` : `${mod[1]}: visible en el menú`);
+      const b = document.querySelector(`[data-x="modvis"][data-k="${k}"]`); if (b) b.focus({preventScroll:true}); break; }
     case 'exp': await doExport(); break;
     case 'imp-pick': pickImport(); break;
     case 'imp-mode': if (ui.imp){ ui.imp.mode = el.dataset.m; render(); } break;
