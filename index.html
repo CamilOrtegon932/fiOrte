@@ -296,6 +296,7 @@ document.documentElement.dataset.theme = window.matchMedia && matchMedia('(prefe
   @keyframes pop{from{opacity:0;transform:scale(.94) translateY(8px)}}
   .modal h2{margin:0 0 4px;font-size:21px;letter-spacing:-.02em}
   .modal .desc{margin:0 0 18px;color:var(--muted);font-size:13px}
+  .modal .desc:empty{margin-bottom:14px}
   .modal label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:12px}
   .modal input,.modal select{display:block;width:100%;margin-top:6px;border:1.5px solid transparent;background-color:var(--fill);border-radius:10px;padding:11px 12px;font-size:15px;outline:0;color:var(--text);transition:border-color .15s}
   .modal input:focus,.modal select:focus{border-color:var(--accent)}
@@ -1490,7 +1491,7 @@ const FORMS = {
     save:(v, c) => { S.extras.push({id:uid(), type:'salario', rec:c.extra.r.id, slot:c.extra.slot, date:v.date, amount:v.amount, desc:c.extra.r.name, client:'', note:v.note.trim(), ...(v.acc ? {acc:v.acc} : {})}); },
   },
   fixedpay: {
-    title:c => 'Marcar pagado · ' + c.extra.f.name, desc:'¿Cómo pagaste este gasto fijo? Con tarjeta sube la deuda de la tarjeta; con cuenta se descuenta de ella.',
+    title:c => 'Marcar pagado · ' + c.extra.f.name, desc:'',
     fields:v => [{n:'acc', l:'¿Cómo pagaste?', t:'acc', accs:spendAccs(v.acc)}, {n:'date', l:'Fecha del pago', t:'date'}],
     defaults:x => ({acc:x.f.acc || '', date:dateDefault()}),
     valid:v => !v.date ? 'Indica la fecha.' : spendCheck(v.acc, v.date, formCtx.extra.f.amount, 0),
