@@ -330,9 +330,6 @@ document.documentElement.dataset.theme = window.matchMedia && matchMedia('(prefe
   .alogo.cash{background:rgba(48,180,85,.14);box-shadow:none;color:var(--green)}
   .alogo.cash svg{width:24px;height:24px}
   .alogo.txt{background:var(--fill);box-shadow:none;font-size:9.5px;font-weight:700;line-height:1.1;text-align:center;color:var(--muted);word-break:break-word}
-  .achip{display:inline-flex;align-items:center;gap:8px;padding:4px 12px 4px 4px}
-  .achip .alogo{width:26px;height:26px;border-radius:8px;padding:3px}
-  .achip .alogo.cash svg{width:16px;height:16px}
   .acc.sel{box-shadow:0 0 0 1.5px var(--accent),var(--shadow)}
   .ccd{margin-bottom:20px}
   .ccd-t{display:flex;align-items:center;gap:10px;color:var(--text);font-size:17px;font-weight:700}
@@ -642,12 +639,6 @@ const ENTITIES = {
   otra:       {name:'Otra entidad', logo:null,                   color:'#8e8e93'},
 };
 const ATYPES = {efectivo:'Efectivo', ahorros:'Cuenta de ahorros', digital:'Cuenta digital', credito:'Tarjeta de crédito'};
-const ACC_STARTER = [
-  ['Efectivo','efectivo','efectivo'], ['RappiPay Ahorros','rappipay','ahorros'], ['Bancolombia Ahorros','bancolombia','ahorros'],
-  ['Nu Ahorros','nu','ahorros'], ['Nequi Ahorros','nequi','ahorros'], ['RappiCard Crédito','rappipay','credito'],
-  ['Única Bancolombia Crédito','bancolombia','credito'], ['Nu Crédito','nu','credito'],
-  ['Davivienda Ahorros','davivienda','ahorros'], ['Davivienda Crédito','davivienda','credito'],
-];
 const isCredit = a => a.type === 'credito';
 const entOf = a => ENTITIES[a.entity] || ENTITIES.otra;
 const entName = a => a.entity === 'otra' ? (a.entityName || 'Otra entidad') : entOf(a).name;
@@ -2702,9 +2693,6 @@ function ccDetail(c){
 function vCuentas(){
   const T = accTotals(), act = S.accounts.filter(a => !a.archived), arch = S.accounts.filter(a => a.archived);
   const cash = act.filter(a => !isCredit(a)), cards = act.filter(isCredit);
-  const missing = ACC_STARTER.map((p, i) => [p, i]).filter(([p]) => !S.accounts.some(a => a.name.trim().toLowerCase() === p[0].toLowerCase()));
-  const sugg = missing.length ? `<div class="card" style="margin-bottom:16px"><h3>Productos sugeridos <span>Toca uno para configurarlo con su saldo real</span></h3>
-    <div class="tchips" style="margin:0">${missing.map(([p, i]) => `<button class="tchip achip" data-a="accstarter" data-i="${i}">${logoHTML({entity:p[1]})}${esc(p[0])}</button>`).join('')}</div></div>` : '';
   const grid = (list, empty) => list.length ? `<div class="accs">${list.map(accCard).join('')}</div>` : `<div class="card" style="margin-bottom:16px">${emptyBox(empty[0], empty[1])}</div>`;
   const R = sum(S.accounts.filter(a => !isCredit(a)), a => reservedOf(a.id));
   return `
@@ -2716,7 +2704,6 @@ function vCuentas(){
     ${kpi('Cupo disponible', money(T.avail), T.limit ? `de ${money(T.limit)} en total` : 'Sin tarjetas', T.avail < 0 ? 'neg' : 'pos')}
   </div>
   ${T.nCash ? '' : '<div class="pflag info" style="margin-bottom:16px">Cuando agregues tu primera cuenta, el Resumen y el Patrimonio pasan a usar los saldos reales de tus cuentas.</div>'}
-  ${sugg}
   <div class="sec-head"><h3>Efectivo y cuentas</h3><div class="btns" style="margin:0"><button class="btn btn-soft btn-sm" data-a="add" data-k="transfers" ${cash.length >= 2 ? '' : 'disabled title="Necesitas al menos dos cuentas"'}>⇄ Transferir</button><button class="btn btn-primary btn-sm" data-a="add" data-k="accounts">+ Agregar</button></div></div>
   ${grid(cash, ['Aún no tienes cuentas', 'Agrega tu efectivo y tus cuentas con el saldo que muestran hoy.'])}
   ${(() => { const trs = S.transfers.filter(t => t.date.slice(0,7) === ui.month).sort((a, b) => b.date.localeCompare(a.date)); if (!trs.length) return '';
@@ -2821,7 +2808,6 @@ document.addEventListener('click', e => {
       if (n){ alert('No se puede eliminar: ' + negMsg(n) + ' Ese dinero ya se usó desde la cuenta de destino.'); break; }
       if (confirm('¿Eliminar esta transferencia? Se revierten los dos lados y su comisión.')){ removeTransfer(S, id); save(); render(); toast('Transferencia eliminada'); } break; }
     case 'recv': { const r = S.recInc.find(x => x.id === id); if (r) openForm('recv', null, {r, slot:el.dataset.k}); break; }
-    case 'accstarter': openForm('account', null, {prefill:ACC_STARTER[+el.dataset.i]}); break;
     case 'accarch': { const a = S.accounts.find(x => x.id === id); if (!a) break; a.archived = !a.archived; save(); render(); toast(a.archived ? 'Archivada · sigue sumando en los totales' : 'Restaurada'); break; }
     case 'ccopen': ui.card = ui.card === id ? null : id; render(); if (ui.card) setTimeout(() => { const d = $('ccdetail'); d && d.scrollIntoView({behavior:'smooth', block:'start'}); }, 30); break;
     case 'ccpay': openForm('cardpay', null, {card:id}); break;
