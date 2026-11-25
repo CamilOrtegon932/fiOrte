@@ -82,6 +82,7 @@ document.documentElement.dataset.theme = window.matchMedia && matchMedia('(prefe
   .btn:active{transform:scale(.97)}
   .btn:disabled{opacity:.4;cursor:not-allowed}
   .btn-primary{background:var(--accent);color:#fff}
+  .btn-danger{background:var(--red);color:#fff}
   .btn-dark{background:var(--dark);color:var(--bg)}
   .btn-soft{background:var(--fill)}
   .btn-sm{padding:6px 12px;font-size:13px;border-radius:8px}
@@ -3532,15 +3533,18 @@ function vDatos(){
     <div class="card"><h3>Estado de tus respaldos</h3>
       <div class="kv"><span>Última exportación</span><b>${esc(lastExp)}</b></div>
       <div class="kv"><span>Respaldo automático en la nube</span><b>${inf ? when(inf.auto) : 'Consultando…'}</b></div>
-      <div class="kv"><span>Respaldo previo a la última importación</span><b>${inf ? when(inf.pre) : 'Consultando…'}</b></div>
+      <div class="kv"><span>Respaldo previo a importar o borrar</span><b>${inf ? when(inf.pre) : 'Consultando…'}</b></div>
       <p class="note" style="margin:10px 0 0">El respaldo automático se actualiza como máximo una vez al día al guardar cambios.</p></div>
   </div>
   <div class="card" style="margin-bottom:16px"><h3>Importar <span>Con vista previa y respaldo previo</span></h3>
     <p class="note" style="margin:0 0 12px">Elige un archivo exportado desde Finanzas. Primero verás qué contiene y podrás decidir si reemplazar o combinar. Tus datos actuales se respaldan antes de cambiar nada, y solo se modifica <b>tu</b> cuenta.</p>
     ${imp ? preview : `<button class="btn btn-soft" data-x="imp-pick">Elegir archivo…</button>`}</div>
   <div class="card" style="margin-bottom:16px"><h3>Recuperar respaldo anterior</h3>
-    <p class="note" style="margin:0 0 12px">${inf && inf.pre ? `Tienes un respaldo de tus datos tomado el ${esc(when(inf.pre))}, justo antes de la última importación o recuperación. Al recuperarlo, lo que tienes ahora queda guardado en su lugar, así que puedes volver atrás.` : 'Cuando importes o recuperes datos, aquí podrás deshacer el cambio.'}</p>
+    <p class="note" style="margin:0 0 12px">${inf && inf.pre ? `Tienes un respaldo de tus datos tomado el ${esc(when(inf.pre))}, justo antes de la última importación, borrado o recuperación. Al recuperarlo, lo que tienes ahora queda guardado en su lugar, así que puedes volver atrás.` : 'Cuando importes, borres o recuperes datos, aquí podrás deshacer el cambio.'}</p>
     <button class="btn btn-soft" data-x="restore" ${inf && inf.pre ? '' : 'disabled'}>Recuperar respaldo anterior</button></div>
+  <div class="card" style="margin-bottom:16px"><h3>Borrar todos mis datos <span>Empezar de cero</span></h3>
+    <p class="note" style="margin:0 0 12px">Quita de tu cuenta todas las cuentas, tarjetas, ingresos, gastos, préstamos, metas, bolsillos e inversiones. Antes se guarda un respaldo para que puedas deshacerlo. Tu usuario, tu contraseña y las demás personas no se tocan.</p>
+    ${hasData(S) ? `<div class="formrow"><label class="field">Escribe BORRAR para confirmar<input id="wipe-word" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="10"></label><button class="btn btn-danger" id="wipe-btn" data-x="wipe" disabled>Borrar todo</button></div>` : '<p class="note" style="margin:0"><b>Tu cuenta ya está en cero:</b> no hay nada que borrar.</p>'}</div>
   ${isAdmin() ? `<div class="card"><h3>Datos de la versión anterior <span>Solo administrador</span></h3>
     <p class="note" style="margin:0 0 12px">${inf && inf.leg ? `Ya hiciste una migración: el respaldo del documento original está guardado (${esc(when(inf.leg))}).` : 'Si todavía tienes datos en la versión anterior (documento finanzas/principal), puedes traerlos a tu cuenta con respaldo y verificación. El original no se modifica ni se borra.'}</p>
     <button class="btn btn-soft" data-x="legacy">Migrar desde la versión anterior</button></div>` : ''}`;
@@ -3599,6 +3603,19 @@ async function restorePrev(){
     ui.dat.info = null; setStatus('ok', 'Respaldo recuperado. Lo que tenías antes quedó guardado como respaldo previo.');
   } catch(e){ ui.dat.info = null; setStatus('err', 'No se recuperó: ' + (e && e.message || e) + '.'); }
 }
+/* Empezar de cero: mismo camino seguro que importar (respaldo previo verificado). Conserva solo las secciones ocultas del menú. */
+const wipeWordOk = () => { const w = $('wipe-word'); return !!w && w.value.trim().toUpperCase() === 'BORRAR'; };
+document.addEventListener('input', e => { if (e.target.id === 'wipe-word') $('wipe-btn').disabled = !wipeWordOk(); });
+async function wipeAll(){
+  if (!wipeWordOk() || !hasData(S)) return;
+  if (!confirm('Vas a BORRAR todos tus registros. Antes se guarda un respaldo que podrás recuperar. ¿Continuar?')) return;
+  setStatus('warn', 'Borrando… no cierres la página.'); window.scrollTo(0, 0);
+  try {
+    const next = normalize(null); if (S.settings.hidden) next.settings.hidden = [...S.settings.hidden];
+    await applyState(next, 'borrado');
+    ui.imp = null; ui.dat.info = null; ui.card = null; setStatus('ok', 'Listo: tu cuenta quedó en cero. Si fue un error, usa «Recuperar respaldo anterior».');
+  } catch(e){ ui.dat.info = null; setStatus('err', 'No se borró: ' + (e && e.message || e) + '.'); }
+}
 async function legacyFromView(){
   if (!isAdmin()) return;
   if (!confirm('Vas a copiar los datos de la versión anterior a tu cuenta, REEMPLAZANDO lo que tienes ahora (se guarda un respaldo previo). El original no se toca. ¿Continuar?')) return;
@@ -3629,6 +3646,7 @@ document.addEventListener('click', async e => {
     case 'imp-apply': await applyImport(); break;
     case 'imp-cancel': ui.imp = null; render(); break;
     case 'restore': await restorePrev(); break;
+    case 'wipe': await wipeAll(); break;
     case 'legacy': await legacyFromView(); break;
     case 'adm-reload': loadUsers(); break;
     case 'adm-open': ui.adm.open[el.dataset.u] = !ui.adm.open[el.dataset.u]; render(); break;
