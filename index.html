@@ -301,9 +301,15 @@ document.documentElement.dataset.theme = window.matchMedia && matchMedia('(prefe
   .modal input:focus,.modal select:focus{border-color:var(--accent)}
   .modal select{appearance:none;-webkit-appearance:none;cursor:pointer;padding-right:36px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none' stroke='%238e8e93' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l5 5 5-5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 13px center;background-size:12px 8px}
   .modal select:disabled{opacity:.6;cursor:default}
-  .modal label.mini{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin:-6px 0 12px;font-weight:500}
-  .modal label.mini span{flex:none}
-  .modal label.mini select{width:auto;min-width:0;max-width:62%;margin:0;padding:6px 30px 6px 10px;min-height:32px;font-size:12.5px;font-weight:600;text-overflow:ellipsis;background-position:right 10px center}
+  .inwrap{display:block;position:relative}
+  .inwrap input{padding-right:52px !important}
+  .paypick{position:absolute;right:6px;top:6px;bottom:0;width:40px;display:grid;place-items:center;border-radius:8px;color:var(--muted)}
+  .paypick.on{color:var(--accent)}
+  .paypick:focus-within{box-shadow:0 0 0 2px var(--accent)}
+  .paypick .pi{display:grid;place-items:center;pointer-events:none}
+  .paypick svg{width:20px;height:20px}
+  .paypick .alogo{width:28px;height:28px;border-radius:8px;padding:3px}
+  .modal .paypick select{position:absolute;inset:0;width:100%;height:100%;margin:0;padding:0;opacity:0;cursor:pointer;font-size:16px}
   .modal select option,.modal select optgroup{background-color:var(--card);color:var(--text)}
   .segc{display:flex;gap:2px;background:var(--fill);border-radius:11px;padding:3px;margin-bottom:16px}
   .segc button{flex:1;border:0;background:none;padding:8px 6px;border-radius:9px;font-weight:600;font-size:13px;cursor:pointer;color:var(--muted);transition:.15s}
@@ -1335,8 +1341,8 @@ const FORMS = {
       {n:'src', t:'seg', rerender:true, opts:[...(modOn('repartidor') ? [['repartidor','Repartidor']] : []), ['independiente','Independiente'],['otro','Otro ingreso']]},
       {n:'date', l:'Fecha', t:'date'},
       ...(v.src === 'repartidor'
-        ? [{n:'gross', l:'Ganancias del día (lo que te pagó la app)', t:'money'}, {n:'fuel', l:'Gasolina', t:'money'},
-           ...(S.accounts.length ? [{n:'cacc', l:'Costos pagados con', t:'mini', opts:[['', 'Descontados de las ganancias'], ...spendAccs(v.cacc).map(a => [a.id, a.name + (isCredit(a) ? ' (tarjeta)' : '')])]}] : []),
+        ? [{n:'gross', l:'Ganancias del día (lo que te pagó la app)', t:'money'},
+           {n:'fuel', l:'Gasolina', t:'money', ...(S.accounts.length ? {pick:{n:'cacc', val:v.cacc, l:'¿Con qué pagaste?', none:'Descontado de las ganancias', accs:spendAccs(v.cacc)}} : {})},
            {n:'bearings', l:'Rodamientos (opcional)', t:'money'},
            {n:'other', l:'Otros costos operativos (opcional)', t:'money'}, {n:'note', l:'Nota (opcional)', t:'text', ph:'Ej: Rappi, zona norte…'}]
         : [{n:'desc', l:'Descripción', t:'text', ph: v.src === 'otro' ? 'Ej: me envió mi mamá, venta de algo…' : 'Ej: diseño de logo, arreglo de computador…'},
@@ -1866,6 +1872,16 @@ let formCtx = null;
 const parseMoney = s => { const neg = /^\s*-/.test(s); const d = String(s).replace(/\D/g,''); return d ? (neg ? -1 : 1) * parseInt(d, 10) : 0; };
 const T = x => typeof x === 'function' ? x(formCtx) : x;
 
+/* Icono dentro de un campo de dinero (como el calendario de la fecha): al tocarlo abre la lista "con qué pagaste".
+   Es un <select> nativo transparente sobre el icono; al elegir, el icono pasa a ser el logo de esa cuenta. */
+const WALLET_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>';
+function payPickHTML(p){
+  const a = p.val && p.accs.find(x => x.id === p.val);
+  const icon = a && (entOf(a).logo || a.entity === 'efectivo') ? logoHTML(a) : WALLET_ICON;
+  const opt = (v, text) => `<option value="${esc(v)}" ${v === (p.val || '') ? 'selected' : ''}>${esc(text)}</option>`;
+  const name = x => x.type === 'efectivo' ? x.name : `${x.name} · ${ATYPES[x.type]}`;
+  return `<span class="paypick${a ? ' on' : ''}" title="${esc(p.l + ' ' + (a ? name(a) : p.none))}"><span class="pi" aria-hidden="true">${icon}</span><select name="${p.n}" data-rerender aria-label="${esc(p.l)}"><optgroup label="${esc(p.l)}">${opt('', p.none)}${p.accs.map(x => opt(x.id, name(x))).join('')}</optgroup></select></span>`;
+}
 function fieldHTML(f, val){
   const c = formCtx;
   if (f.t === 'seg'){
@@ -1873,11 +1889,12 @@ function fieldHTML(f, val){
     return `<div class="segc">${f.opts.map(o => `<button type="button" class="${o[0] === val ? 'on' : ''}" data-a="seg" data-n="${f.n}" data-v="${o[0]}">${esc(o[1])}</button>`).join('')}</div>`;
   }
   if (f.t === 'select') return `<label>${esc(f.l)}<select name="${f.n}" ${f.rerender ? 'data-rerender' : ''} ${f.locked && c.edit ? 'disabled' : ''}>${f.opts.map(o => `<option value="${esc(o[0])}" ${o[0] === val ? 'selected' : ''}>${esc(o[1])}</option>`).join('')}</select></label>`;
-  if (f.t === 'money') return `<label>${esc(f.l)}<input name="${f.n}" data-money inputmode="numeric" autocomplete="off" placeholder="$ 0" value="${val ? fmt(val) : ''}"></label>`;
+  if (f.t === 'money'){
+    const inp = `<input name="${f.n}" data-money inputmode="numeric" autocomplete="off" placeholder="$ 0" value="${val ? fmt(val) : ''}">`;
+    return `<label>${esc(f.l)}${f.pick ? `<span class="inwrap">${inp}${payPickHTML(f.pick)}</span>` : inp}</label>`;
+  }
   if (f.t === 'num') return `<label>${esc(f.l)}<input name="${f.n}" type="number" min="0" step="${f.step || 1}" inputmode="decimal" placeholder="${esc(f.ph || '')}" value="${val ? esc(val) : ''}"></label>`;
   if (f.t === 'date') return `<label>${esc(f.l)}<input name="${f.n}" type="date" value="${esc(val)}"></label>`;
-  /* Selector discreto de una sola línea: al tocarlo abre la lista */
-  if (f.t === 'mini') return `<label class="mini"><span>${esc(f.l)}</span><select name="${f.n}">${f.opts.map(o => `<option value="${esc(o[0])}" ${o[0] === val ? 'selected' : ''}>${esc(o[1])}</option>`).join('')}</select></label>`;
   /* Selector de cuenta con logo (reutilizable para "¿Cómo pagaste?" y cuentas receptoras) */
   if (f.t === 'acc'){
     const rr = f.rerender ? ' data-rr="1"' : '';
@@ -1891,6 +1908,7 @@ function collect(){
   const def = FORMS[formCtx.kind], f = $('form'), out = {...formCtx.vals};
   def.fields(formCtx.vals).forEach(fl => {
     if (fl.t === 'seg') return;
+    if (fl.pick && f.elements[fl.pick.n]) out[fl.pick.n] = f.elements[fl.pick.n].value;
     const el = f.elements[fl.n]; if (!el) return;
     out[fl.n] = fl.t === 'money' ? parseMoney(el.value) : fl.t === 'num' ? (el.value === '' ? 0 : Number(el.value)) : el.value;
   });
