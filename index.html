@@ -1241,7 +1241,7 @@ function dashboard(k){
   const pay = upcomingPayments(k);
   const acc = nw.mode === 'acc';
   const D = {
-    k, s, ini, asOf, nw, acc, disp: acc ? nw.free : nw.disp,
+    k, prevK, s, ini, asOf, nw, acc, disp: acc ? nw.free : nw.disp,
     /* Liquidez (Fase 7): saldo real − reservado = libre; libre − comprometido sin reservar = liquidez disponible */
     liq: acc ? (c => ({ cash:nw.cash, efectivo:nw.efectivo, reserved:nw.reserved, free:nw.free, committed:c, liquid:nw.free - c }))(k === todayKey ? pay.committed : 0) : null,
     incCmp: compareWithPrev(s.income, ps.income, prevHas, k),
